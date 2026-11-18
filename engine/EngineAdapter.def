@@ -1,0 +1,6 @@
+LIBRARY EngineAdapter
+
+EXPORTS
+    WbioQueryEngineInterface
+    WbioAdapterInterface
+    EndOperation

@@ -1,0 +1,33 @@
+# Build output
+bin/
+obj/
+**/x64/
+**/x86/
+**/ARM64/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.tlog
+*.recipe
+*.log
+
+# Local MCP/config with secrets
+opencode.jsonc
+.opencode/
+.env
+.env.*
+!.env.example
+
+# Local signing / regenerable package artifacts
+*.pfx
+*.cat
+fingerprints.json
+
+# OS/editor
+Thumbs.db
+Desktop.ini
+.vs/
+.vscode/
+.idea/

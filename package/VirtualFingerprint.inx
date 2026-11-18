@@ -1,0 +1,120 @@
+;
+; Virtual fingerprint simulator - root-enumerated UMDF 2 driver
+;
+; Two devices share one driver binary:
+;   ROOT\WFP_SENSOR  - WBDI sensor, exclusive, BA/SY only.
+;   ROOT\WFP_CONTROL - private control interface, BA/SY/IU, no WinBio config.
+;
+; Generated VirtualFingerprint.inf is stamped with UMDF 2.15.0.
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Biometric
+ClassGuid={53D29EF7-377C-4D14-864B-EB3A85769359}
+Provider=%ProviderString%
+DriverVer=11/17/2026,1.0.0.0
+CatalogFile=VirtualFingerprint.cat
+PnpLockdown=1
+
+[Manufacturer]
+%ManufacturerName%=VirtualFP,NTamd64
+
+[VirtualFP.NTamd64]
+%SensorDeviceName%=Sensor_Install,ROOT\WFP_SENSOR
+%ControlDeviceName%=Control_Install,ROOT\WFP_CONTROL
+
+; ========================= Sensor: WBDI interface =========================
+
+[Sensor_Install.NT]
+CopyFiles=UMDriverCopy,WinBioEngineAdapterCopy
+
+[Sensor_Install.NT.HW]
+AddReg=Sensor_Device_AddReg,Sensor_DriverPlugInAddReg,Sensor_DatabaseAddReg
+
+[Sensor_Install.NT.Services]
+AddService=WUDFRd,0x000001fa,WUDFRD_ServiceInstall
+
+[Sensor_Install.NT.Wdf]
+UmdfService=VirtualFingerprint,VirtualFingerprint_Install
+UmdfServiceOrder=VirtualFingerprint
+
+[Sensor_Device_AddReg]
+HKR,,"DeviceCharacteristics",0x10001,0x0100
+HKR,,"Security",,"D:P(A;;GA;;;BA)(A;;GA;;;SY)"
+HKR,,"Exclusive",0x10001,1
+
+[Sensor_DriverPlugInAddReg]
+HKR,WinBio\Configurations,DefaultConfiguration,,"0"
+HKR,WinBio\Configurations\0,SensorMode,0x10001,1
+HKR,WinBio\Configurations\0,SystemSensor,0x10001,1
+HKR,WinBio\Configurations\0,SensorAdapterBinary,,"WinBioSensorAdapter.DLL"
+HKR,WinBio\Configurations\0,EngineAdapterBinary,,"EngineAdapter.DLL"
+HKR,WinBio\Configurations\0,StorageAdapterBinary,,"WinBioStorageAdapter.DLL"
+HKR,WinBio\Configurations\0,DatabaseId,,"54F34EB1-7E06-4B62-806D-A50029444C8D"
+
+[Sensor_DatabaseAddReg]
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},BiometricType,0x00010001,0x00000008
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},Attributes,0x00010001,0x00000001
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},Format,,"00000000-0000-0000-0000-000000000000"
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},InitialSize,0x00010001,0x00000020
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},AutoCreate,0x00010001,0x00000001
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},AutoName,0x00010001,0x00000001
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},FilePath,,""
+HKLM,System\CurrentControlSet\Services\WbioSrvc\Databases\{54F34EB1-7E06-4B62-806D-A50029444C8D},ConnectionString,,""
+
+; ======================== Control: private interface ========================
+
+[Control_Install.NT]
+CopyFiles=UMDriverCopy
+
+[Control_Install.NT.HW]
+AddReg=Control_Device_AddReg
+
+[Control_Install.NT.Services]
+AddService=WUDFRd,0x000001fa,WUDFRD_ServiceInstall
+
+[Control_Install.NT.Wdf]
+UmdfService=VirtualFingerprint,VirtualFingerprint_Install
+UmdfServiceOrder=VirtualFingerprint
+
+[Control_Device_AddReg]
+HKR,,"Security",,"D:P(A;;GA;;;BA)(A;;GA;;;SY)(A;;GA;;;IU)"
+
+; ================================ Common ==================================
+
+[VirtualFingerprint_Install]
+UmdfLibraryVersion=$UMDFVERSION$
+ServiceBinary=%12%\UMDF\VirtualFingerprint.dll
+
+[WUDFRD_ServiceInstall]
+DisplayName=%WudfRdDisplayName%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\WUDFRd.sys
+
+[DestinationDirs]
+UMDriverCopy=12,UMDF
+WinBioEngineAdapterCopy=11,WinBioPlugins
+
+[SourceDisksFiles]
+VirtualFingerprint.dll=1
+EngineAdapter.dll=1
+
+[SourceDisksNames]
+1=%MediaDescription%
+
+[UMDriverCopy]
+VirtualFingerprint.dll
+
+[WinBioEngineAdapterCopy]
+EngineAdapter.dll
+
+[Strings]
+ManufacturerName="Windows Fingerprint Simulator"
+ProviderString="Windows Fingerprint Simulator"
+MediaDescription="Virtual Fingerprint Installation Media"
+WudfRdDisplayName="Windows Driver Foundation - User-mode Driver Framework Reflector"
+SensorDeviceName="Virtual WBDI Fingerprint Sensor"
+ControlDeviceName="Virtual Fingerprint Control Device"

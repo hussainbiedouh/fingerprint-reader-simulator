@@ -1,0 +1,3 @@
+# Regenerable signing/output artifacts (see README.md for regeneration commands).
+*.pfx
+*.cat
