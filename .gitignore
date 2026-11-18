@@ -4,6 +4,8 @@ obj/
 **/x64/
 **/x86/
 **/ARM64/
+zkshim/Win32/Release/
+zkshim/Win32/Debug/
 *.obj
 *.pdb
 *.ilk
