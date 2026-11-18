@@ -1,22 +1,76 @@
 # ZKTeco libzkfp.dll shim
 
-Minimal x64 `libzkfp.dll` that satisfies the `ZKFPM_*` bindings used by MER's
-clean-room ctypes reader (`E:/Projects/mer/ZktecoZkfReader.py`). It returns one
-virtual device, serves deterministic captures from a named pipe or a config
-file, and performs template matching locally. No real ZKTeco SDK is involved.
+Minimal x64 and x86 `libzkfp.dll` shims that satisfy the `ZKFPM_*` bindings
+used by MER's clean-room ctypes reader (`E:/Projects/mer/ZktecoZkfReader.py`).
+They return one virtual device, serve deterministic captures from a named pipe
+or a config file, and perform template matching locally. No real ZKTeco SDK is
+involved. User mode only: no kernel driver, no USB emulation, no MER source or
+file edits.
 
-Built with VS18 (`v145`) + WDK 26100, x64, `Release`.
+Built with VS18 (`v145`) + WDK 26100, `Release`, for two architectures: x64
+and Win32 (x86). Both DLLs carry the same 16 functions.
 
 ## Build
 
 ```
 MSBuild.exe zkshim\zkshim.sln /p:Configuration=Release /p:Platform=x64
+MSBuild.exe zkshim\zkshim.sln /p:Configuration=Release /p:Platform=Win32
 ```
 
-Output: `zkshim\x64\Release\libzkfp.dll`. Verify with
-`dumpbin /exports zkshim\x64\Release\libzkfp.dll` — all 16 names below must
-appear undecorated. Placement into MER is owned by
-`scripts/Deploy-ZkShim.ps1`; this project never copies the DLL anywhere.
+Outputs:
+
+| Platform | DLL | Deployment destination |
+| --- | --- | --- |
+| `x64` | `zkshim\x64\Release\libzkfp.dll` | `%WINDIR%\System32\libzkfp.dll` |
+| `Win32` | `zkshim\Win32\Release\libzkfp.dll` | `%WINDIR%\SysWOW64\libzkfp.dll` |
+
+Placement is owned by `scripts\Install-Global-ZkShim.ps1` (system-wide) or
+`scripts\Deploy-ZkShim.ps1` (one app); this project never copies a DLL into a
+system or app directory. The build performs no system install.
+
+Verify exports with `dumpbin /exports <dll>`. The x64 DLL must show all 16
+names below undecorated. The Win32 DLL must show those 16 bare names **plus**
+16 decorated `_ZKFPM_*@N` aliases (32 total).
+
+## Signing
+
+Both DLLs are signed with the local test PFX (SHA256). The cert is already in
+the local Trusted Root / Local Machine stores, so `signtool verify /pa` passes.
+
+```
+signtool sign /f package\VirtualFingerprint.pfx /fd SHA256 zkshim\x64\Release\libzkfp.dll
+signtool sign /f package\VirtualFingerprint.pfx /fd SHA256 zkshim\Win32\Release\libzkfp.dll
+signtool verify /pa zkshim\x64\Release\libzkfp.dll
+signtool verify /pa zkshim\Win32\Release\libzkfp.dll
+```
+
+`signtool` prompts for the local test certificate password; do not store it
+here. Re-sign after every rebuild: MSBuild overwrites the signed image and drops
+the signature.
+
+## Global install (KnownDLLs)
+
+Primary mode: any app that loads `libzkfp.dll` by bare name sees the shim.
+`scripts\Install-Global-ZkShim.ps1` (elevated) copies the signed x64 DLL to
+`%WINDIR%\System32\libzkfp.dll`, the signed x86 DLL to
+`%WINDIR%\SysWOW64\libzkfp.dll`, and adds `libzkfp` = `libzkfp.dll` under
+`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs`.
+
+The Windows loader reads that list at boot, so a **reboot is required**. The
+override applies to bare-name loads such as `ctypes.WinDLL('libzkfp.dll')` or
+`LoadLibrary(L"libzkfp.dll")` only; a full-path load bypasses KnownDLLs and
+loads that path instead. Both architectures are covered by the single
+registration: 64-bit processes resolve `System32`, 32-bit processes resolve
+`SysWOW64`.
+
+This is user mode only: no kernel driver, no USB-level emulation, no MER source
+or file edits. For a single target app, `scripts\Deploy-ZkShim.ps1` (with
+`-Backup`) and `scripts\Restore-ZkShim.ps1` remain the secondary per-app option.
+
+Backups of replaced DLLs and the registry value go to
+`%ProgramData%\WindowsFingerprintSimulator\backups\`. Uninstall with
+`scripts\Uninstall-Global-ZkShim.ps1` (elevated), then reboot. A bad entry can
+block boot; WinRE recovery is in `docs\SETUP.md`.
 
 ## Exports
 
@@ -42,6 +96,19 @@ appear undecorated. Placement into MER is owned by
 All exports use `__stdcall` and C linkage. On x64 the calling convention is
 unified and names are undecorated, which matches `ctypes.WinDLL` (stdcall)
 loading by bare name.
+
+**x86 calling convention: stdcall only.** The Win32 DLL is `__stdcall`; cdecl
+x86 (`ctypes.CDLL` / `__cdecl`) is **not supported** and must not be used — a
+cdecl caller would not pop the callee's arguments and would corrupt the stack.
+Use `ctypes.WinDLL` on both architectures. The Win32 DLL publishes each
+function twice (same address): the bare name for `GetProcAddress`/`WinDLL`
+lookup, and the decorated `_ZKFPM_*@N` symbol, where `N` is the exact number of
+argument bytes popped on x86. Verified counts: `@0` for the zero-arg functions
+(`Init`, `Terminate`, `GetDeviceCount`, `DBInit`), `@4` for one pointer/int
+(`OpenDevice`, `CloseDevice`, `DBFree`), `@8` for `DBDel` (2 args), `@16` for the
+four-arg setters/getters and `DBAdd`, `@20` for the five-arg capture/DB match
+functions, and `@24` for `DBMerge` (6 args). Aliases are defined in
+`zkshim-x86.def`; x64 uses `zkshim.def`.
 
 ## Template framing
 
@@ -101,7 +168,8 @@ template. `zkshim-config.txt` remains the unattended fallback used by
   with `DLL_NAME = 'libzkfp.dll'`; `ctypes.wintypes.HANDLE/UINT` arguments).
   The same file's `MAX_TEMPLATE_SIZE = 2048` (line 21) and image sizing via
   `GetCaptureParamsEx` (lines 193-207) set the buffer limits above. MER Python
-  is 64-bit, so the DLL must be x64.
+  is 64-bit, so the x64 DLL is required; the x86 DLL covers 32-bit apps through
+   the same KnownDLL registration.
 - Toolchain: local WDK 26100 headers under
   `C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\{um,shared}`
   and MSVC `v145` under

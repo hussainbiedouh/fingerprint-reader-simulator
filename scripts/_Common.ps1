@@ -126,3 +126,101 @@ function Get-InstallableInfPath {
     if ($candidate -ne $script:InfPath) { Copy-Item -LiteralPath $candidate -Destination $script:InfPath -Force }
     return $script:InfPath
 }
+
+# --- Global KnownDLL shim (shared by the Install/Uninstall/Verify scripts) ---
+
+$script:GlobalStateRoot     = Join-Path $env:ProgramData 'WindowsFingerprintSimulator'
+$script:GlobalBackupDir     = Join-Path $script:GlobalStateRoot 'backups'
+$script:GlobalStatePath     = Join-Path $script:GlobalStateRoot 'global-zkshim-state.json'
+$script:GlobalMarkerPath    = Join-Path $script:GlobalStateRoot 'global-zkshim-installed.marker'
+$script:KnownDllsKey        = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs'
+$script:KnownDllsRegPath    = $script:KnownDllsKey -replace '^HKLM:\\', 'HKLM\'
+$script:KnownDllsName       = 'libzkfp'
+$script:KnownDllsData       = 'libzkfp.dll'
+$script:UmciPolicyKey       = 'HKLM:\SYSTEM\CurrentControlSet\Control\CI\Policy'
+$script:UmciValueName       = 'UsermodeCodeIntegrityPolicyEnforcementStatus'
+$script:X64ShimPath         = Join-Path $script:RepoRoot 'zkshim\x64\Release\libzkfp.dll'
+$script:X86ShimPath         = Join-Path $script:RepoRoot 'zkshim\Win32\Release\libzkfp.dll'
+
+function Get-GlobalPaths {
+    return [PSCustomObject]@{
+        StateRoot          = $script:GlobalStateRoot
+        BackupDir          = $script:GlobalBackupDir
+        StatePath          = $script:GlobalStatePath
+        MarkerPath         = $script:GlobalMarkerPath
+        System32Dll        = Join-Path $env:SystemRoot 'System32\libzkfp.dll'
+        SysWOW64Dll        = Join-Path $env:SystemRoot 'SysWOW64\libzkfp.dll'
+        X64Shim            = $script:X64ShimPath
+        X86Shim            = $script:X86ShimPath
+        KnownDllsKey       = $script:KnownDllsKey
+        KnownDllsRegPath   = $script:KnownDllsRegPath
+        KnownDllsName      = $script:KnownDllsName
+        KnownDllsData      = $script:KnownDllsData
+        UmciPolicyKey      = $script:UmciPolicyKey
+        UmciValueName      = $script:UmciValueName
+    }
+}
+
+function Get-UmciEnforcementStatus {
+    # WMI is authoritative; the CI\Policy registry value is not present on default installs.
+    $value = $null
+    try {
+        $deviceGuard = Get-CimInstance -Namespace 'root\Microsoft\Windows\DeviceGuard' -ClassName Win32_DeviceGuard -ErrorAction Stop
+        if ($null -ne $deviceGuard) { $value = $deviceGuard.UsermodeCodeIntegrityPolicyEnforcementStatus }
+    } catch { } # Fall through to the registry, then fail closed as unknown.
+
+    if ($null -eq $value) {
+        $key = Get-Item -LiteralPath $script:UmciPolicyKey -ErrorAction SilentlyContinue
+        if ($null -ne $key) { $value = $key.GetValue($script:UmciValueName) }
+    }
+    if ($null -ne $value -and $value -in @(0, 1, 2)) { return [int]$value }
+    return -1 # Unknown or unexpected: callers must refuse a test-signed KnownDLL.
+}
+
+function Get-HardlinkCount {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return 0 }
+    try { $links = @(& fsutil hardlink list $Path 2>$null) } catch { return -1 }
+    if ($LASTEXITCODE -ne 0 -or $links.Count -eq 0) { return -1 }
+    return $links.Count
+}
+
+function Get-PeMachine {
+    # COFF Machine field: PE signature at e_lfanew, Machine at e_lfanew + 4.
+    param([Parameter(Mandatory = $true)][string]$Path)
+    try {
+        $stream = [IO.File]::OpenRead($Path)
+        try {
+            $reader = [IO.BinaryReader]::new($stream)
+            $stream.Position = 0x3C
+            $peOffset = $reader.ReadInt32()
+            $stream.Position = $peOffset + 4
+            return ('0x{0:X4}' -f $reader.ReadUInt16())
+        } finally { $stream.Dispose() }
+    } catch { return 'unknown' }
+}
+
+function Get-GlobalBackupName {
+    param(
+        [Parameter(Mandatory = $true)][string]$Prefix,
+        [Parameter(Mandatory = $true)][string]$Extension,
+        [Parameter(Mandatory = $true)][string]$Directory
+    )
+    $name = "$Prefix.$Extension"
+    $n = 1
+    while (Test-Path -LiteralPath (Join-Path $Directory $name)) {
+        $name = "$Prefix-{0:D2}.$Extension" -f $n
+        $n++
+    }
+    return $name
+}
+
+function Get-ShimSignature {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return [PSCustomObject]@{ Status = 'Missing'; Subject = '' }
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    $subject = if ($signature.SignerCertificate) { $signature.SignerCertificate.Subject } else { '' }
+    return [PSCustomObject]@{ Status = [string]$signature.Status; Subject = $subject }
+}

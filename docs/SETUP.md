@@ -64,6 +64,81 @@ Manual setup for the test-signed virtual fingerprint driver on Windows 11 Pro, b
 
    Removes both root devices with `pnputil /remove-device`, finds the driver package via `Get-WindowsDriver -Online` (locale-independent), and deletes it with `pnputil /delete-driver oemN.inf /uninstall /force`. Safe to run repeatedly. The test certificate and TestSigning boot setting are left in place; remove them manually if needed (see Warnings).
 
+## Global ZKTeco shim (KnownDLLs, any app sees reader)
+
+Primary option when any app loading `libzkfp.dll` must see the shim. It places
+signed DLLs in `%WINDIR%\System32` (x64) and `%WINDIR%\SysWOW64` (x86), then
+registers `libzkfp` under
+`HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\KnownDLLs`. KnownDLLs
+applies only to bare-name loads; a full-path `LoadLibrary` bypasses it. No
+kernel driver and no MER edits are involved.
+
+> **Warning:** A bad KnownDLL entry or unsigned DLL can prevent boot. Backups
+> live in `%ProgramData%\WindowsFingerprintSimulator\backups\` (DLL `.bak` files
+> plus `KnownDLLs-<stamp>.reg`). Keep them until a clean reboot is confirmed.
+> If Windows will not start: boot WinRE, open **Command Prompt**, load the
+> offline SYSTEM hive from the Windows drive (adjust `C:` if WinRE assigns a
+> different letter), and delete the value:
+>
+> ```cmd
+> reg load HKLM\OFFSYS C:\Windows\System32\config\SYSTEM
+> reg delete "HKLM\OFFSYS\CurrentControlSet\Control\Session Manager\KnownDLLs" /v libzkfp /f
+> reg unload HKLM\OFFSYS
+> ```
+>
+> Then open `notepad`, use **File > Open** to copy the backed-up `.bak` DLLs
+> over `C:\Windows\System32\libzkfp.dll` and
+> `C:\Windows\SysWOW64\libzkfp.dll`, and reboot. Avoid bare-name app loads until
+> recovery is done.
+
+Ordered steps:
+
+1. **Build and sign both shims:** follow `zkshim\README.md` — MSBuild for `x64`
+   and `Win32`, `signtool` with the local test PFX, then `signtool verify /pa`
+   on both DLLs. Re-sign after every rebuild; the PFX password is not stored in
+   docs.
+
+2. **Install globally (admin):**
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\Install-Global-ZkShim.ps1
+   ```
+
+   Preflight needs both signed shims and refuses when UMCI enforcement status
+   is `2`. The script copies and hash-verifies both DLLs, then writes the
+   KnownDLLs value last. No automatic reboot. If `fsutil hardlink list` reports
+   more than one link on a target DLL, add `-AllowHardlinkRewrite` only after
+   confirming the backup.
+
+3. **Reboot manually.** The loader reads the KnownDLL list at boot.
+
+4. **Verify (read-only):**
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Global-ZkShim.ps1
+   ```
+
+5. **Run the integration test (admin, x64 Python):**
+
+   ```powershell
+   python .\tests\zk_known_dll_test.py
+   ```
+
+   Expect `PASS all`: bare-name load resolves under `System32`, SHA256 matches
+   the built shim, and the capture checks pass. The test writes its fallback
+   next to the loaded DLL and restores it on exit.
+
+6. **Uninstall with restore (admin):**
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File .\scripts\Uninstall-Global-ZkShim.ps1
+   ```
+
+   Removes the KnownDLLs value, restores the newest `.bak` over both DLLs (or
+   deletes the shim when no DLL existed before), and verifies. Reboot to clear
+   the loaded mapping. Per-app MER deploy stays separate:
+   `.\scripts\Restore-ZkShim.ps1 -TargetDir E:\Projects\mer`.
+
 ## Hardware IDs
 
 | Device | Hardware ID |

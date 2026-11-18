@@ -24,6 +24,7 @@ It presents a virtual fingerprint reader to Windows through the Windows Biometri
 | `include/` | Shared driver/engine protocol header |
 | `package/` | INF, catalog/signing regeneration instructions |
 | `src/` | GUI support code: JSON store, driver client, WinBio enrollment |
+| `zkshim/` | Dual-arch ZKTeco shim DLL source and docs |
 | `scripts/` | Setup, install, refresh, uninstall, verification scripts |
 | `tests/WinBioProbe/` | Acceptance probe for WinBio events |
 | `tests/TriggerTool/` | Sends template + trigger IOCTLs to the control device |
@@ -97,9 +98,26 @@ dotnet run --project .\tests\WinBioProbe\WinBioProbe.csproj -c Release -- monito
 
 ## ZKTeco shim mode
 
-In addition to the WinBio reader, the simulator can act as a fake ZKTeco SDK reader. Build `zkshim\zkshim.sln`, choose `ZKTeco shim` in the GUI, and click a fingerprint to stage it. A `libzkfp.dll` shim running inside the target app sends `ACQUIRE` over `\\.\pipe\wfp-zk-shim` and receives a framed template.
+In addition to the WinBio reader, the simulator can act as a fake ZKTeco SDK reader. Build `zkshim\zkshim.sln` for x64 and Win32, choose `ZKTeco shim` in the GUI, and click a fingerprint to stage it. A `libzkfp.dll` shim running inside the target app sends `ACQUIRE` over `\\.\pipe\wfp-zk-shim` and receives a framed template.
 
-Deploy is explicit and reversible:
+### Global install (primary: any app sees the reader)
+
+Register the signed shim as a KnownDLL. Any app that loads `libzkfp.dll` by bare name then gets the shim, with no per-app file changes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\Install-Global-ZkShim.ps1   # elevated
+# reboot required
+powershell -ExecutionPolicy Bypass -File .\scripts\Verify-Global-ZkShim.ps1
+python .\tests\zk_known_dll_test.py   # elevated x64 Python
+```
+
+Remove with `Uninstall-Global-ZkShim.ps1` (elevated); it restores backed-up DLLs.
+
+Coverage is both architectures: x64 DLL goes to `%SystemRoot%\System32`, x86 DLL to `%SystemRoot%\SysWOW64`. KnownDLLs applies only to bare-name loads such as `LoadLibrary("libzkfp.dll")` or `ctypes.WinDLL("libzkfp.dll")`; a full-path load bypasses it. A reboot is required because the loader reads the KnownDLL list at boot. See `docs\SETUP.md` for safe steps, backup, uninstall, and WinRE recovery.
+
+### Per-app deploy (secondary: one app only)
+
+For a single target app, deploy the DLL locally instead. This is explicit and reversible:
 
 ```powershell
 .\scripts\Deploy-ZkShim.ps1 -Backup
@@ -107,7 +125,7 @@ Deploy is explicit and reversible:
 .\scripts\Restore-ZkShim.ps1
 ```
 
-The deploy script refuses to overwrite an existing `libzkfp.dll` unless `-Backup` is supplied. See `zkshim\README.md` for the wire format and `tests\zk_shim_test.py` for an unattended integration test.
+The deploy script refuses to overwrite an existing `libzkfp.dll` unless `-Backup` is supplied. No kernel driver and no MER source edits are involved. See `zkshim\README.md` for the wire format and `tests\zk_shim_test.py` for an unattended integration test.
 
 ## Known limitations
 
@@ -116,6 +134,7 @@ The deploy script refuses to overwrite an existing `libzkfp.dll` unless `-Backup
 - WBS identity mapping is reliable only for templates enrolled through `tests/EnrollTool`
 - Test-signed driver requires local test-signing configuration
 - ZKTeco support is a fake SDK shim, not USB-level hardware emulation
+- KnownDLL override affects bare-name loads only; full-path loads bypass it and a reboot is required after install
 - The shim must not be deployed over a real ZKTeco SDK unless you intend to test with it
 
 ## Security

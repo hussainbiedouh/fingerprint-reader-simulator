@@ -1,0 +1,41 @@
+LIBRARY libzkfp
+
+; x86 (__stdcall) build. Every function is published twice and both rows point
+; at the same implementation:
+;   bare name   - ctypes.WinDLL / GetProcAddress by undecorated name
+;   _name@N     - the real stdcall symbol; N = argument bytes popped on x86
+; On x64 these names are undecorated and zkshim.def is used instead.
+
+EXPORTS
+    ZKFPM_Init             = _ZKFPM_Init@0
+    _ZKFPM_Init@0          = _ZKFPM_Init@0
+    ZKFPM_Terminate        = _ZKFPM_Terminate@0
+    _ZKFPM_Terminate@0     = _ZKFPM_Terminate@0
+    ZKFPM_GetDeviceCount   = _ZKFPM_GetDeviceCount@0
+    _ZKFPM_GetDeviceCount@0 = _ZKFPM_GetDeviceCount@0
+    ZKFPM_OpenDevice       = _ZKFPM_OpenDevice@4
+    _ZKFPM_OpenDevice@4    = _ZKFPM_OpenDevice@4
+    ZKFPM_CloseDevice      = _ZKFPM_CloseDevice@4
+    _ZKFPM_CloseDevice@4   = _ZKFPM_CloseDevice@4
+    ZKFPM_SetParameters    = _ZKFPM_SetParameters@16
+    _ZKFPM_SetParameters@16 = _ZKFPM_SetParameters@16
+    ZKFPM_GetParameters    = _ZKFPM_GetParameters@16
+    _ZKFPM_GetParameters@16 = _ZKFPM_GetParameters@16
+    ZKFPM_GetCaptureParamsEx = _ZKFPM_GetCaptureParamsEx@16
+    _ZKFPM_GetCaptureParamsEx@16 = _ZKFPM_GetCaptureParamsEx@16
+    ZKFPM_AcquireFingerprint = _ZKFPM_AcquireFingerprint@20
+    _ZKFPM_AcquireFingerprint@20 = _ZKFPM_AcquireFingerprint@20
+    ZKFPM_DBInit           = _ZKFPM_DBInit@0
+    _ZKFPM_DBInit@0        = _ZKFPM_DBInit@0
+    ZKFPM_DBFree           = _ZKFPM_DBFree@4
+    _ZKFPM_DBFree@4        = _ZKFPM_DBFree@4
+    ZKFPM_DBAdd            = _ZKFPM_DBAdd@16
+    _ZKFPM_DBAdd@16        = _ZKFPM_DBAdd@16
+    ZKFPM_DBDel            = _ZKFPM_DBDel@8
+    _ZKFPM_DBDel@8         = _ZKFPM_DBDel@8
+    ZKFPM_DBIdentify       = _ZKFPM_DBIdentify@20
+    _ZKFPM_DBIdentify@20   = _ZKFPM_DBIdentify@20
+    ZKFPM_DBMatch          = _ZKFPM_DBMatch@20
+    _ZKFPM_DBMatch@20      = _ZKFPM_DBMatch@20
+    ZKFPM_DBMerge          = _ZKFPM_DBMerge@24
+    _ZKFPM_DBMerge@24      = _ZKFPM_DBMerge@24
