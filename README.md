@@ -1,4 +1,4 @@
-# Windows Fingerprint Simulator
+# Fingerprint Reader Simulator
 
 A Windows fingerprint reader simulator for development and testing.
 
