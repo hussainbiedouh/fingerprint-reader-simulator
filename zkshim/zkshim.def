@@ -1,0 +1,19 @@
+LIBRARY libzkfp
+
+EXPORTS
+    ZKFPM_Init
+    ZKFPM_Terminate
+    ZKFPM_GetDeviceCount
+    ZKFPM_OpenDevice
+    ZKFPM_CloseDevice
+    ZKFPM_SetParameters
+    ZKFPM_GetParameters
+    ZKFPM_GetCaptureParamsEx
+    ZKFPM_AcquireFingerprint
+    ZKFPM_DBInit
+    ZKFPM_DBFree
+    ZKFPM_DBAdd
+    ZKFPM_DBDel
+    ZKFPM_DBIdentify
+    ZKFPM_DBMatch
+    ZKFPM_DBMerge

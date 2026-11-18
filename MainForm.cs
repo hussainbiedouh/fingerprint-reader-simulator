@@ -1,4 +1,5 @@
 using System.Drawing;
+using System.Text;
 using System.Windows.Forms;
 
 namespace WindowsFingerprintSimulator;
@@ -7,10 +8,15 @@ public sealed class MainForm : Form
 {
     private readonly List<FingerprintRecord> _records;
     private readonly ImageList _thumbnails;
+    private readonly List<Bitmap> _thumbnailBitmaps = new();
     private readonly TextBox _nameBox;
     private readonly Button _addButton;
     private readonly ListView _list;
     private readonly TextBox _log;
+    private readonly ComboBox _modeBox;
+
+    private const string ShimMode = "ZKTeco shim";
+    private ZkShimPipe? _zkPipe;
 
     private bool _busy;
     private ListViewItem? _lastProbed;
@@ -30,6 +36,10 @@ public sealed class MainForm : Form
         _addButton = new Button { Dock = DockStyle.Fill, Text = "Add fingerprint" };
         _addButton.Click += AddButton_Click;
 
+        _modeBox = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
+        _modeBox.Items.AddRange(new[] { "WinBio", ShimMode });
+        _modeBox.SelectedIndex = 0;
+
         var hint = new Label
         {
             Dock = DockStyle.Fill,
@@ -38,20 +48,28 @@ public sealed class MainForm : Form
             ForeColor = SystemColors.GrayText,
         };
 
+        var modeGroup = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2 };
+        modeGroup.RowStyles.Add(new RowStyle(SizeType.Absolute, 16));
+        modeGroup.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        modeGroup.Controls.Add(new Label { Dock = DockStyle.Fill, Text = "Reader mode", TextAlign = ContentAlignment.MiddleLeft }, 0, 0);
+        modeGroup.Controls.Add(_modeBox, 0, 1);
+
         var top = new TableLayoutPanel
         {
             Dock = DockStyle.Top,
             Height = 48,
-            ColumnCount = 3,
+            ColumnCount = 4,
             RowCount = 1,
             Padding = new Padding(10, 8, 10, 2),
         };
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 280));
-        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 130));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 110));
+        top.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 150));
         top.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         top.Controls.Add(_nameBox, 0, 0);
         top.Controls.Add(_addButton, 1, 0);
-        top.Controls.Add(hint, 2, 0);
+        top.Controls.Add(modeGroup, 2, 0);
+        top.Controls.Add(hint, 3, 0);
 
         _list = new ListView
         {
@@ -103,10 +121,21 @@ public sealed class MainForm : Form
 
         Log("Windows Fingerprint Simulator ready.");
         RefreshList();
+        ZkShimPipe.SelfCheck();
+        EnsurePipeServer();
+    }
+
+    private bool IsShimMode => (string?)_modeBox.SelectedItem == ShimMode;
+
+    private void EnsurePipeServer()
+    {
+        _zkPipe ??= new ZkShimPipe(idHex => Log($"ZKTeco shim acquired template (id {idHex})."));
     }
 
     private void RefreshList()
     {
+        List<Bitmap> previous = new(_thumbnailBitmaps);
+        _thumbnailBitmaps.Clear();
         _thumbnails.Images.Clear();
         _list.Items.Clear();
 
@@ -123,9 +152,16 @@ public sealed class MainForm : Form
                 template = Array.Empty<byte>();
             }
 
-            using var thumbnail = CreateThumbnail(template);
+            Bitmap thumbnail = CreateThumbnail(template);
+            _thumbnailBitmaps.Add(thumbnail);
             _thumbnails.Images.Add(thumbnail);
             _list.Items.Add(new ListViewItem(record.Name, i) { Tag = record });
+        }
+
+        // ImageList clones lazily on handle creation; bitmaps must outlive Images.Clear().
+        foreach (Bitmap bitmap in previous)
+        {
+            bitmap.Dispose();
         }
 
         Log($"Loaded {_records.Count} fingerprint(s).");
@@ -243,6 +279,13 @@ public sealed class MainForm : Form
         _lastProbed = item;
         _lastProbeTick = now;
 
+        if (IsShimMode)
+        {
+            StageShim(record);
+            return;
+        }
+
+        SetBusy(true);
         byte[] template;
         try
         {
@@ -251,10 +294,9 @@ public sealed class MainForm : Form
         catch (FormatException)
         {
             Log($"Probe failed: stored template for '{record.Name}' is invalid.");
+            SetBusy(false);
             return;
         }
-
-        SetBusy(true);
         _ = ProbeAsync(record, template);
     }
 
@@ -274,6 +316,35 @@ public sealed class MainForm : Form
         {
             SetBusy(false);
         }
+    }
+
+    private void StageShim(FingerprintRecord record)
+    {
+        try
+        {
+            byte[] stored = Convert.FromBase64String(record.TemplateBase64);
+            byte[] frame = new byte[8 + stored.Length];
+            Encoding.ASCII.GetBytes("MZKF").CopyTo(frame, 0);
+            BitConverter.GetBytes((uint)stored.Length).CopyTo(frame, 4);
+            stored.CopyTo(frame, 8);
+
+            string idHex = record.IdHex.Length > 16 ? record.IdHex[..16] : record.IdHex;
+            EnsurePipeServer();
+            _zkPipe!.SetPending(idHex, Convert.ToBase64String(frame));
+            Log($"Ready for ZKTeco shim acquisition (id {idHex}).");
+        }
+        catch (Exception ex)
+        {
+            Log($"ZKTeco shim staging failed: {ex.Message}");
+        }
+    }
+
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        ZkShimPipe? pipe = _zkPipe;
+        _zkPipe = null;
+        pipe?.Dispose();
+        base.OnFormClosing(e);
     }
 
     private void SetBusy(bool busy)

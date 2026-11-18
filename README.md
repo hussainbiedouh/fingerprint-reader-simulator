@@ -95,13 +95,28 @@ dotnet run --project .\tests\WinBioProbe\WinBioProbe.csproj -c Release -- list
 dotnet run --project .\tests\WinBioProbe\WinBioProbe.csproj -c Release -- monitor
 ```
 
+## ZKTeco shim mode
+
+In addition to the WinBio reader, the simulator can act as a fake ZKTeco SDK reader. Build `zkshim\zkshim.sln`, choose `ZKTeco shim` in the GUI, and click a fingerprint to stage it. A `libzkfp.dll` shim running inside the target app sends `ACQUIRE` over `\\.\pipe\wfp-zk-shim` and receives a framed template.
+
+Deploy is explicit and reversible:
+
+```powershell
+.\scripts\Deploy-ZkShim.ps1 -Backup
+.\scripts\Verify-ZkShim.ps1
+.\scripts\Restore-ZkShim.ps1
+```
+
+The deploy script refuses to overwrite an existing `libzkfp.dll` unless `-Backup` is supplied. See `zkshim\README.md` for the wire format and `tests\zk_shim_test.py` for an unattended integration test.
+
 ## Known limitations
 
 - Windows Hello login is not supported; that requires a Microsoft biometric signature
 - GUI-added fingerprints are saved for read simulation even if WBS enrollment fails
 - WBS identity mapping is reliable only for templates enrolled through `tests/EnrollTool`
 - Test-signed driver requires local test-signing configuration
-- This project simulates WBF/WBDI only; it does not emulate vendor USB fingerprint protocols
+- ZKTeco support is a fake SDK shim, not USB-level hardware emulation
+- The shim must not be deployed over a real ZKTeco SDK unless you intend to test with it
 
 ## Security
 

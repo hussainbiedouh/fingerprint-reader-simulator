@@ -9,6 +9,10 @@ $script:SensorHardwareId = 'ROOT\WFP_SENSOR'
 $script:ControlHardwareId = 'ROOT\WFP_CONTROL'
 $script:HardwareIds      = @($script:SensorHardwareId, $script:ControlHardwareId)
 
+$script:ZkTargetDllName = 'libzkfp.dll'
+$script:ZkMarkerName    = 'libzkfp.shim.deployed'
+$script:ZkBackupPrefix  = 'libzkfp.dll.bak.'
+
 function Test-IsAdmin {
     $principal = [Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()
     return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -17,6 +21,34 @@ function Test-IsAdmin {
 function Assert-Admin {
     if (-not (Test-IsAdmin)) {
         throw 'Administrator rights required. Right-click PowerShell and select "Run as administrator".'
+    }
+}
+
+function Assert-TargetWritable {
+    param([Parameter(Mandatory = $true)][string]$Path)
+    $full = [IO.Path]::GetFullPath($Path)
+    foreach ($root in @(${env:ProgramFiles}, ${env:ProgramFiles(x86)})) {
+        if (-not $root) { continue }
+        $rootFull = [IO.Path]::GetFullPath($root).TrimEnd('\')
+        if ($full -ieq $rootFull -or $full.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) { Assert-Admin; return }
+    }
+}
+
+function Resolve-ZkShimPath {
+    param([Parameter(Mandatory = $true)][string]$ShimDll)
+    if (-not [IO.Path]::IsPathRooted($ShimDll)) { $ShimDll = Join-Path $script:RepoRoot $ShimDll }
+    return [IO.Path]::GetFullPath($ShimDll)
+}
+
+function Get-ZkDeployPaths {
+    param([Parameter(Mandatory = $true)][string]$TargetDir)
+    $dir = [IO.Path]::GetFullPath($TargetDir)
+    return [PSCustomObject]@{
+        TargetDir    = $dir
+        TargetDll    = Join-Path $dir $script:ZkTargetDllName
+        Marker       = Join-Path $dir $script:ZkMarkerName
+        BackupPrefix = $script:ZkBackupPrefix
+        BackupFilter = "$($script:ZkBackupPrefix)*"
     }
 }
 
